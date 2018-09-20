@@ -1,0 +1,10 @@
+- name: log_mysql
+  config:
+    database: "dionaea"
+    user: "username"
+    password: "password"
+    host: "127.0.0.1"
+    port: "3306"
+    geoipdb:
+      geoipdb_city_path: "/path/to/GeoLite2-City.mmdb"
+      geoipdb_asn_path: "/path/to/GeoLite2-ASN.mmdb"

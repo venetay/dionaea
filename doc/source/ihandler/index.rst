@@ -31,6 +31,7 @@ List of available ihandlers
     log_incident
     log_json
     log_sqlite
+    log_mysql
     nfq
     p0f
     store

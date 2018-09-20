@@ -133,6 +133,7 @@ install_available_python_config(
         log_incident.yaml.in
         log_json.yaml.in
         log_sqlite.yaml.in
+        log_mysql.yaml.in
         nfq.yaml
         p0f.yaml
         store.yaml
@@ -150,6 +151,7 @@ install_enabled_python_config(
         emuprofile.yaml
         ftp.yaml
         log_sqlite.yaml
+        log_mysql.yaml
         store.yaml
         tftp_download.yaml
 )

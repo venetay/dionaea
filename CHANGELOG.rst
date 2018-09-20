@@ -1,6 +1,10 @@
 Changelog
 =========
 
+My forked version
+-------------------
+* Add mysql ihandler and Geolocation IP support. 
+
 0.8.0 - (`master`_)
 -------------------
 
