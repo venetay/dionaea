@@ -3,11 +3,9 @@ from dionaea.core import ihandler
 
 import logging
 import json
-#import sqlite3
 import time
 import MySQLdb
 import geoip2.database
-from dionaea.core import g_dionaea 
 
 
 logger = logging.getLogger('log_mysql')
