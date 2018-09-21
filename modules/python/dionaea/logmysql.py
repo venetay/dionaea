@@ -3,9 +3,11 @@ from dionaea.core import ihandler
 
 import logging
 import json
+#import sqlite3
 import time
 import MySQLdb
 import geoip2.database
+from dionaea.core import g_dionaea 
 
 
 logger = logging.getLogger('log_mysql')
@@ -79,6 +81,7 @@ class logsqlhandler(ihandler):
                 remote_hostname TEXT,
                 remote_port INTEGER,
                 country_name VARCHAR(45) DEFAULT '',
+                country_iso_code varchar(2) DEFAULT '',
                 city_name VARCHAR(128) DEFAULT '',
                 org VARCHAR(128) DEFAULT '',
                 org_asn INTEGER,
@@ -668,11 +671,15 @@ class logsqlhandler(ihandler):
                 city = ""
             country = response_city.country.name
             if country is None:
-                country = ""
+                country = ''
+                country_code = ''
+            else:            
+                country_code = response_city.country.iso_code
         except:
             city = ""
             country = ""
-
+            country_code = ''
+        
         try:
             response_asn = self.reader_asn.asn(con.remote.host)
             if response_asn.autonomous_system_organization is not None:
@@ -683,14 +690,16 @@ class logsqlhandler(ihandler):
             if response_asn.autonomous_system_number is not None:
                 asn_num = response_asn.autonomous_system_number
             else:
-                asn_num = ""
+                asn_num = 0
         except:
-            org = ""
-            asn_num = ""    
+            org = 0
+            asn_num = 0    
+
+        print ("!!!!!!!!!!", city, country, country_code, org, asn_num, con.remote.host)
 
         try:        
-            r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, city_name, org, org_asn) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                                    (time.time(), connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, city, org, asn_num) )
+            r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                    (time.time(), connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num) )
         except Exception as e:
             print(e)        
         attackid = self.cursor.lastrowid
