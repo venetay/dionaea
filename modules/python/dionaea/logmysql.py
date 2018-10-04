@@ -280,6 +280,8 @@ class logsqlhandler(ihandler):
                 connection INTEGER,
                 download_url VARCHAR(2000),
                 download_md5_hash VARCHAR(32),
+                connection_timestamp INTEGER,
+                filesize INTEGER,
                 PRIMARY KEY (download)
                 -- CONSTRAINT downloads_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection)
             )""")
@@ -695,13 +697,14 @@ class logsqlhandler(ihandler):
 
         print ("!!!!!!!!!!", city, country, country_code, org, asn_num, con.remote.host)
 
+        t = time.time()
         try:        
             r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                                    (time.time(), connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num) )
+                                    (t, connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num) )
         except Exception as e:
             print(e)        
         attackid = self.cursor.lastrowid
-        self.attacks[con] = (attackid, attackid)
+        self.attacks[con] = (attackid, attackid, t)
         self.dbh.commit()
 
         # maybe this was a early connection?
@@ -799,7 +802,7 @@ class logsqlhandler(ihandler):
                 childroot, childid = self.attacks[icd.child]
             else:
                 childid = parentid
-            self.attacks[icd.child] = (parentroot, childid)
+            self.attacks[icd.child] = (parentroot, childid, 0)
             logger.info("child has ids %s" % str(self.attacks[icd.child]))
             logger.info("child %i parent %i root %i" %
                         (childid, parentid, parentroot) )
@@ -871,13 +874,24 @@ class logsqlhandler(ihandler):
         if con not in self.attacks:
             return
         attackid = self.attacks[con][1]
+        time = self.attacks[con][2]
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1", self.attacks[con])
         logger.info("complete for attackid %i" % attackid)
+
         try:
-            self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash) VALUES (%s,%s,%s)",
-                            (attackid, icd.url, icd.md5hash) )
+            self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize) VALUES (%s,%s,%s,%s,%s)",
+                            (attackid, icd.url, icd.md5hash, time, 0))
         except Exception as e:
             print(e)
         self.dbh.commit()
+
+        import os
+        file = os.getcwd()+'/'+icd.file
+        if os.path.isfile(file):
+            file_size = os.path.getsize(file)  # os.stat(os.getcwd()+'/'+icd.file)
+            print("!!!!!!!icd!!!!!!!!", file_size)
+        else:
+            print("!!!!!!!icd!!!!!!!!", icd.file)
 
 
     def handle_incident_dionaea_service_shell_listen(self, icd):
