@@ -1,9 +1,11 @@
 from dionaea import IHandlerLoader
 from dionaea.core import ihandler
 
+import os
 import logging
 import json
 import time
+import datetime
 import MySQLdb
 import geoip2.database
 
@@ -83,6 +85,7 @@ class logsqlhandler(ihandler):
                 city_name VARCHAR(128) DEFAULT '',
                 org VARCHAR(128) DEFAULT '',
                 org_asn INTEGER,
+                connection_datetime DATETIME,
                 PRIMARY KEY (connection)
         )""")
 
@@ -282,6 +285,7 @@ class logsqlhandler(ihandler):
                 download_md5_hash VARCHAR(32),
                 connection_timestamp INTEGER,
                 filesize INTEGER,
+                connection_datetime DATETIME,
                 PRIMARY KEY (download)
                 -- CONSTRAINT downloads_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection)
             )""")
@@ -698,13 +702,14 @@ class logsqlhandler(ihandler):
         print ("!!!!!!!!!!", city, country, country_code, org, asn_num, con.remote.host)
 
         t = time.time()
+        dt = datetime.datetime.fromtimestamp(t)
         try:        
-            r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
-                                    (t, connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num) )
+            r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                                    (t, connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num, dt) )
         except Exception as e:
             print(e)        
         attackid = self.cursor.lastrowid
-        self.attacks[con] = (attackid, attackid, t)
+        self.attacks[con] = (attackid, attackid, t, dt)
         self.dbh.commit()
 
         # maybe this was a early connection?
@@ -875,24 +880,26 @@ class logsqlhandler(ihandler):
             return
         attackid = self.attacks[con][1]
         time = self.attacks[con][2]
+        dt = self.attacks[con][3]
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1", self.attacks[con])
         logger.info("complete for attackid %i" % attackid)
 
-        try:
-            self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize) VALUES (%s,%s,%s,%s,%s)",
-                            (attackid, icd.url, icd.md5hash, time, 0))
-        except Exception as e:
-            print(e)
-        self.dbh.commit()
-
-        import os
         file = os.getcwd()+'/'+icd.file
         if os.path.isfile(file):
             file_size = os.path.getsize(file)  # os.stat(os.getcwd()+'/'+icd.file)
             print("!!!!!!!icd!!!!!!!!", file_size)
         else:
+            file_size = 0
             print("!!!!!!!icd!!!!!!!!", icd.file)
 
+        try:
+            self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s)",
+                            (attackid, icd.url, icd.md5hash, time, file_size, dt))
+        except Exception as e:
+            print(e)
+        self.dbh.commit()
+
+        
 
     def handle_incident_dionaea_service_shell_listen(self, icd):
         con=icd.con
@@ -1232,4 +1239,3 @@ class logsqlhandler(ihandler):
             print(e)
 
         self.dbh.commit()
-
