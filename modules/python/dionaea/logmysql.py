@@ -696,7 +696,7 @@ class logsqlhandler(ihandler):
             else:
                 asn_num = 0
         except:
-            org = 0
+            org = ""
             asn_num = 0    
 
         print ("!!!!!!!!!!", city, country, country_code, org, asn_num, con.remote.host)
@@ -898,8 +898,6 @@ class logsqlhandler(ihandler):
         except Exception as e:
             print(e)
         self.dbh.commit()
-
-        
 
     def handle_incident_dionaea_service_shell_listen(self, icd):
         con=icd.con
