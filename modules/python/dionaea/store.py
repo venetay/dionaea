@@ -69,9 +69,15 @@ class storehandler(ihandler):
         p = icd.path
         # ToDo: use sha1 or sha256
         md5 = md5file(p)
+        if os.path.isfile(p):
+            file_size = os.path.getsize(p)
+        else:
+            file_size = 0
         # ToDo: use sys.path.join()
         n = os.path.join(self.download_dir, md5)
+        print("!!!!!!!!!!!!!!!path!!!!!!!!!!!!!!!!!1", file_size)
         i = incident("dionaea.download.complete.hash")
+        i.file_size = file_size
         i.file = n
         i.url = icd.url
         if hasattr(icd, 'con'):

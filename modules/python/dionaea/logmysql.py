@@ -58,7 +58,7 @@ class logsqlhandler(ihandler):
         self.pending = {}
 
         try:
-            self.dbh = MySQLdb.connect(host=self.host, user=self.user, passwd=self.password, db=self.database, port=int(self.port))
+            self.dbh = MySQLdb.connect(host=self.host, user=self.user, passwd=self.password, db=self.database, port=int(self.port), charset="utf8", use_unicode=True)
         except:
             print("Unable to connect the database")
 
@@ -883,21 +883,14 @@ class logsqlhandler(ihandler):
         dt = self.attacks[con][3]
         print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1", self.attacks[con])
         logger.info("complete for attackid %i" % attackid)
-
-        file = os.getcwd()+'/'+icd.file
-        if os.path.isfile(file):
-            file_size = os.path.getsize(file)  # os.stat(os.getcwd()+'/'+icd.file)
-            print("!!!!!!!icd!!!!!!!!", file_size)
-        else:
-            file_size = 0
-            print("!!!!!!!icd!!!!!!!!", icd.file)
-
+        print("!!!!!!!!!!!!!!!!!!!1", icd.file_size)
         try:
             self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s)",
-                            (attackid, icd.url, icd.md5hash, time, file_size, dt))
+                            (attackid, icd.url, icd.md5hash, time, icd.file_size, dt))
         except Exception as e:
             print(e)
         self.dbh.commit()
+
 
     def handle_incident_dionaea_service_shell_listen(self, icd):
         con=icd.con
