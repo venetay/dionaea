@@ -6,8 +6,10 @@ import logging
 import json
 import time
 import datetime
+import calendar
 import MySQLdb
 import geoip2.database
+import requests
 
 
 logger = logging.getLogger('log_mysql')
@@ -43,12 +45,14 @@ class logsqlhandler(ihandler):
         self.port = config.get("port", "")
         self.geoipdb_city_path = config.get("geoipdb").get("geoipdb_city_path", "")
         self.geoipdb_asn_path = config.get("geoipdb").get("geoipdb_asn_path", "")
+        self.vtapikey = config.get("virustotal").get("apikey", "")
         print("!!!!!!!!!database!!!!!!!!", self.database)
         print("!!!!!!!!!user!!!!!!!!", self.user)
         print("!!!!!!!!!password!!!!!!!!", self.password)
         print("!!!!!!!!!host!!!!!!!!", self.host)
         print("!!!!!!!!!port!!!!!!!!", self.port)
         print("!!!!!!!!!geoipdb!!!!!!!!", config.get("geoipdb"))
+        print("!!!!!!!!!vtapikey!!!!!!!!", self.vtapikey)
 
     def start(self):
         ihandler.__init__(self, self.path)
@@ -891,6 +895,8 @@ class logsqlhandler(ihandler):
             print(e)
         self.dbh.commit()
 
+        self.handle_incident_dionaea_modules_python_virustotal_report(icd)
+
 
     def handle_incident_dionaea_service_shell_listen(self, icd):
         con=icd.con
@@ -986,14 +992,29 @@ class logsqlhandler(ihandler):
 
     def handle_incident_dionaea_modules_python_virustotal_report(self, icd):
         md5 = icd.md5hash
-        f = open(icd.path, mode='r')
-        j = json.load(f)
+        if not self.vtapikey:
+            try:
+                f = open(icd.path, mode='r')
+                j = json.load(f)
+            except:
+                j = {'response_code': -2}
+        else:
+            url = 'https://www.virustotal.com/vtapi/v2/file/report'
+            params = {'apikey': self.vtapikey, 'resource': md5}
+            try:
+                response = requests.get(url, params=params)
+                j = response.json()
+            except:
+                j = {'response_code': -2}
 
-        if j['response_code'] == 1: # file was known to virustotal
+        is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
+
+        if is_exist != 0 and j['response_code'] == 1: # file was known to virustotal
             permalink = j['permalink']
-            date = j['scan_date']
+            # Convert UTC scan_date to Unix time  
+            date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
             try:            
-                self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,str(%s))",
+                self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
                                     (md5, permalink, date))
             except Exception as e:
                 print(e)

@@ -8,3 +8,5 @@
     geoipdb:
       geoipdb_city_path: "/path/to/GeoLite2-City.mmdb"
       geoipdb_asn_path: "/path/to/GeoLite2-ASN.mmdb"
+    virustotal:
+      apikey: ""
