@@ -9,12 +9,22 @@ import geoip2.database
 import requests
 
 def update_base():
+
+    config = {
+        "database": "dionaea",
+        "user": "root"
+        "password": "root"
+        "host": "127.0.0.1"
+        "port": "3306"
+        "vtapikey": ""
+    }
+
     try:
-        self.dbh = MySQLdb.connect(host=self.host, user=self.user, passwd=self.password, db=self.database, port=int(self.port), charset="utf8", use_unicode=True)
+        dbh = MySQLdb.connect(host=config['host'], user=config['user'], passwd=config['password'], db=config['database'], port=int(config['port']), charset="utf8", use_unicode=True)
     except:
         print("Unable to connect the database")
 
-    self.cursor = self.dbh.cursor()
+    cursor = dbh.cursor()
 
 
     files = os.listdir("/opt/dionaea/var/lib/dionaea/binaries/")
@@ -22,9 +32,9 @@ def update_base():
     url = 'https://www.virustotal.com/vtapi/v2/file/report'
     for f in files:
         md5 = f
-        is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
+        is_exist = cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
         if is_exist == 0: 
-            params = {'apikey': self.vtapikey, 'resource': md5}
+            params = {'apikey': config['vtapikey'], 'resource': md5}
             try:
                 response = requests.get(url, params=params)
                 j = response.json()
@@ -38,14 +48,14 @@ def update_base():
                 # Convert UTC scan_date to Unix time  
                 date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
                 try:            
-                    self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
+                    cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
                                         (md5, permalink, date))
                 except Exception as e:
                     print(e)
 
-                self.dbh.commit()
+                dbh.commit()
 
-                virustotal = self.cursor.lastrowid
+                virustotal = cursor.lastrowid
 
                 scans = j['scans']
                 for av, val in scans.items():
@@ -54,12 +64,12 @@ def update_base():
                     if res == '':
                         res = None
                     try:
-                        self.cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
+                        cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
                                             (virustotal, av, res))
                     except Exception as e:
                         print(e)
                    
                     logger.debug("scanner {} result {}".format(av,scans[av]))
-                self.dbh.commit()
+                dbh.commit()
 
             time.sleep(25)
