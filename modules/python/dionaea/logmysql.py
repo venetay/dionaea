@@ -603,6 +603,55 @@ class logsqlhandler(ihandler):
         self.dbh.commit()
 
 
+        files = os.listdir("/opt/dionaea/var/lib/dionaea/binaries/")
+        print("!!!!!!!!!!!!!!!!!!!1", files)
+        url = 'https://www.virustotal.com/vtapi/v2/file/report'
+        for f in files:
+            md5 = f
+            is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
+            if is_exist == 0: 
+                params = {'apikey': self.vtapikey, 'resource': md5}
+                try:
+                    response = requests.get(url, params=params)
+                    j = response.json()
+                except:
+                    j = {'response_code': -2}
+
+                print(j)
+
+                if j['response_code'] == 1: # file was known to virustotal
+                    permalink = j['permalink']
+                    # Convert UTC scan_date to Unix time  
+                    date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
+                    try:            
+                        self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
+                                            (md5, permalink, date))
+                    except Exception as e:
+                        print(e)
+
+                    self.dbh.commit()
+
+                    virustotal = self.cursor.lastrowid
+
+                    scans = j['scans']
+                    for av, val in scans.items():
+                        res = val['result']
+                        # not detected = '' -> NULL
+                        if res == '':
+                            res = None
+                        try:
+                            self.cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
+                                                (virustotal, av, res))
+                        except Exception as e:
+                            print(e)
+                       
+                        logger.debug("scanner {} result {}".format(av,scans[av]))
+                    self.dbh.commit()
+
+                time.sleep(25)
+
+
+
         # updates, database schema corrections for old versions
 
         # svn rev 2143 removed the table dcerpcs
@@ -992,51 +1041,55 @@ class logsqlhandler(ihandler):
 
     def handle_incident_dionaea_modules_python_virustotal_report(self, icd):
         md5 = icd.md5hash
-        if not self.vtapikey:
-            try:
-                f = open(icd.path, mode='r')
-                j = json.load(f)
-            except:
-                j = {'response_code': -2}
-        else:
-            url = 'https://www.virustotal.com/vtapi/v2/file/report'
-            params = {'apikey': self.vtapikey, 'resource': md5}
-            try:
-                response = requests.get(url, params=params)
-                j = response.json()
-            except:
-                j = {'response_code': -2}
-
         is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
-
-        if is_exist != 0 and j['response_code'] == 1: # file was known to virustotal
-            permalink = j['permalink']
-            # Convert UTC scan_date to Unix time  
-            date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
-            try:            
-                self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
-                                    (md5, permalink, date))
-            except Exception as e:
-                print(e)
-
-            self.dbh.commit()
-
-            virustotal = self.cursor.lastrowid
-
-            scans = j['scans']
-            for av, val in scans.items():
-                res = val['result']
-                # not detected = '' -> NULL
-                if res == '':
-                    res = None
+        if is_exist == 0: 
+            if not self.vtapikey:
                 try:
-                    self.cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
-                                        (virustotal, av, res))
+                    f = open(icd.path, mode='r')
+                    j = json.load(f)
+                except:
+                    j = {'response_code': -2}
+            else:
+                url = 'https://www.virustotal.com/vtapi/v2/file/report'
+                params = {'apikey': self.vtapikey, 'resource': md5}
+                try:
+                    response = requests.get(url, params=params)
+                    j = response.json()
+                    if j['response_code'] == -2:
+                        time.sleep(63)
+                        response = requests.get(url, params=params)
+                        j = response.json()
+                except:
+                    j = {'response_code': -2}
+
+            if j['response_code'] == 1: # file was known to virustotal
+                permalink = j['permalink']
+                # Convert UTC scan_date to Unix time  
+                date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
+                try:            
+                    self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
+                                        (md5, permalink, date))
                 except Exception as e:
                     print(e)
-               
-                logger.debug("scanner {} result {}".format(av,scans[av]))
-            self.dbh.commit()
+
+                self.dbh.commit()
+
+                virustotal = self.cursor.lastrowid
+
+                scans = j['scans']
+                for av, val in scans.items():
+                    res = val['result']
+                    # not detected = '' -> NULL
+                    if res == '':
+                        res = None
+                    try:
+                        self.cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
+                                            (virustotal, av, res))
+                    except Exception as e:
+                        print(e)
+                   
+                    logger.debug("scanner {} result {}".format(av,scans[av]))
+                self.dbh.commit()
 
     def handle_incident_dionaea_modules_python_mysql_login(self, icd):
         con = icd.con
