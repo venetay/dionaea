@@ -993,6 +993,7 @@ class logsqlhandler(ihandler):
     def handle_incident_dionaea_modules_python_virustotal_report(self, icd):
         md5 = icd.md5hash
         is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
+        print("!!!!!!!!!!select!!!!!!!!!!", is_exist, is_exist == 0, type(is_exist))
         if is_exist == 0: 
             if not self.vtapikey:
                 try:
