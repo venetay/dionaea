@@ -1,0 +1,108 @@
+#!/bin/bash
+
+script_dir=$(dirname "$(readlink -f "$0")")
+
+dionaea_directory() {
+    DIONAEADIR=$(dirname $PWD/$0)/..
+    DIONAEADIR=$(cd ${DIONAEADIR} && pwd -P 2>/dev/null || pwd)
+}
+
+dionaea_status() {
+    # Print status
+    PID=$(cat ${PIDFILE} 2>/dev/null || echo "")
+    if [ -n "$PID" ]; then
+        if ps -p "$PID" 2>&1 >/dev/null; then
+            echo "dionaea is running (PID: ${PID})."
+        else
+            echo "dionaea is not running (PID: ${PID})."
+            echo "Removing stale PID file"
+            rm -f ${PIDFILE}
+        fi
+    else
+        echo "dionaea is not running."
+    fi
+}
+
+dionaea_start() {
+    # Start Dionaea
+    
+    PID=$(cat ${PIDFILE} 2>/dev/null || echo -n "")
+    if [ -z "$PID" ]; then
+        echo "Starting dionaea ..."
+        cd build && make install >/dev/null 2>&1 && cd .. 
+        authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D 
+    fi
+}
+
+dionaea_stop () {
+    # Stop Dionaea
+    PID=$(cat ${PIDFILE} 2>/dev/null || echo -n "")
+    if [ -n "$PID" ]; then
+        echo -n "Stopping dionaea..."
+        if kill -TERM $PID; then
+            ((t = 60))
+            while ((t > 1)); do
+                sleep 1
+                if kill -0 $PID >/dev/null 2>&1; then
+                    ((t -= 1))
+                else
+                    echo "terminated."
+                    echo "Removing stale PID file"
+                    rm -f ${PIDFILE}
+                    return
+                fi
+            done
+            kill -KILL $PID
+            echo "killed."
+        else
+            echo -e "\nRemoving stale PID file"
+            rm -f ${PIDFILE}
+        fi
+    else
+        echo "dionaea is not running."
+    fi
+}
+
+dionaea_usage() {
+    echo "usage: $0 <start|stop|restart|status>"
+}
+
+################################################################################
+## Main script
+################################################################################
+
+if [ "$#" = 0 ]
+then
+    dionaea_usage
+    exit 1
+fi
+
+dionaea_directory $0
+cd ${DIONAEADIR}
+PIDFILE=var/run/dionaea.pid
+CFGFILE=etc/dionaea/dionaea.cfg
+USER=dionaea
+GROUP=dionaea
+set -e
+
+key=$1
+shift 1
+case $key in
+    stop)
+        dionaea_stop $*
+        ;;
+    start)
+        dionaea_start $*
+        ;;
+    restart)
+        dionaea_stop $*
+        dionaea_start $*
+        ;;
+    status)
+        dionaea_status $*
+        ;;
+    *)
+        dionaea_usage
+        exit 1
+        ;;
+esac
