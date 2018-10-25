@@ -40,12 +40,6 @@ dionaea_start() {
         echo "Starting dionaea ..."
         cd ${DIONAEADIR}/build && make install >/dev/null 2>&1 && cd .. 
         $SUDO authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D 
-     else
-	echo "Removing stale PID file"
-        rm -f ${PIDFILE}
-	echo "Starting dionaea ..."
-        cd ${DIONAEADIR}/build && make install >/dev/null 2>&1 && cd .. 
-        $SUDO authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D
     fi
 }
 
