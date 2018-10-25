@@ -1,9 +1,19 @@
 #!/bin/bash
 
+SUDO=''
+if (( $EUID != 0 )); then
+    SUDO='sudo'
+fi
+
 script_dir=$(dirname "$(readlink -f "$0")")
 
 dionaea_directory() {
-    DIONAEADIR=$(dirname $PWD/$0)/..
+    if [[ "$0" = /* ]]
+    then
+        DIONAEADIR=$(dirname $0)/..
+    else
+        DIONAEADIR=$(dirname $PWD/$0)/..
+    fi
     DIONAEADIR=$(cd ${DIONAEADIR} && pwd -P 2>/dev/null || pwd)
 }
 
@@ -29,8 +39,8 @@ dionaea_start() {
     PID=$(cat ${PIDFILE} 2>/dev/null || echo -n "")
     if [ -z "$PID" ]; then
         echo "Starting dionaea ..."
-        cd build && make install >/dev/null 2>&1 && cd .. 
-        authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D 
+        cd ${DIONAEADIR}/build && make install >/dev/null 2>&1 && cd .. 
+        $SUDO authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D 
     fi
 }
 
