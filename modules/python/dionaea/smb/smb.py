@@ -33,6 +33,7 @@ import hashlib
 import logging
 import os
 import tempfile
+import re
 from uuid import UUID
 
 from .include.smbfields import *
@@ -81,6 +82,8 @@ class smbd(connection):
         self.printer = b'' # spoolss file "queue"
 
         self.config = None
+
+        self.is_wncr = False
 
     def apply_config(self, config=None):
         # Avoid import loops
@@ -342,6 +345,12 @@ class smbd(connection):
             # get Path as ascii string
             f,v = h.getfield_and_val('Path')
             Service = f.i2repr(h,v)
+            # Hand-crafted WannaCrypt packets - SMB Tree Connect AndX Request, contain 
+            # these two hardcoded strings: \\192.168.56.20\\IPC$ or \\172.16.99.5\\IPC$
+            if "192.168.56.20" in Service or "172.16.99.5" in Service:
+                self.is_wncr = True
+            else:
+                self.is_wncr = False
 
             # compile Service from the last part of path
             # remove \\
@@ -666,11 +675,22 @@ class smbd(connection):
                     # try to locate the executable and remove the prepended data
                     # now, we will have the executable itself
                     offset = 0
+                    fix_wncr_offset = 0
                     for i, c in enumerate(xor_output):
-                        if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
-                            offset = i
-                            smblog.info('DoublePulsar payload - MZ header found...')
-                            break
+                        if self.is_wncr:
+                            if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
+                                if fix_wncr_offset == 1:
+                                    offset = i
+                                    smblog.info('DoublePulsar payload - WannaCrypt - MZ header found...')
+                                    break
+                                else:
+                                    fix_wncr_offset += 1
+                                    continue
+                        else:
+                            if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
+                                offset = i
+                                smblog.info('DoublePulsar payload - MZ header found...')
+                                break
 
                     # save the captured payload/gift/evil/buddy to disk
                     smblog.info('DoublePulsar payload - Save to disk')
@@ -685,6 +705,8 @@ class smbd(connection):
                         suffix=download_suffix,
                         dir=download_dir
                     )
+
+                    xor_output = re.sub(b'\x00*$', b'', xor_output)
                     fp.write(xor_output[offset:])
                     fp.close()
                     self.buf2 = b''
