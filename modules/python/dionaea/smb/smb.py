@@ -706,7 +706,8 @@ class smbd(connection):
                         dir=download_dir
                     )
 
-                    xor_output = re.sub(b'\x00*$', b'', xor_output)
+                    if self.is_wncr:
+                        xor_output = re.sub(b'\x00*$', b'', xor_output)
                     fp.write(xor_output[offset:])
                     fp.close()
                     self.buf2 = b''
