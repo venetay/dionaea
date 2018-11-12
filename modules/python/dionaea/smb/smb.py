@@ -33,7 +33,7 @@ import hashlib
 import logging
 import os
 import tempfile
-import re
+import lief
 from uuid import UUID
 
 from .include.smbfields import *
@@ -675,22 +675,11 @@ class smbd(connection):
                     # try to locate the executable and remove the prepended data
                     # now, we will have the executable itself
                     offset = 0
-                    fix_wncr_offset = 0
                     for i, c in enumerate(xor_output):
-                        if self.is_wncr:
-                            if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
-                                if fix_wncr_offset == 1:
-                                    offset = i
-                                    smblog.info('DoublePulsar payload - WannaCrypt - MZ header found...')
-                                    break
-                                else:
-                                    fix_wncr_offset += 1
-                                    continue
-                        else:
-                            if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
-                                offset = i
-                                smblog.info('DoublePulsar payload - MZ header found...')
-                                break
+                        if ((xor_output[i] == 0x4d and xor_output[i + 1] == 0x5a) and xor_output[i + 2] == 0x90):
+                            offset = i
+                            smblog.info('DoublePulsar payload - MZ header found...')
+                            break
 
                     # save the captured payload/gift/evil/buddy to disk
                     smblog.info('DoublePulsar payload - Save to disk')
@@ -707,8 +696,22 @@ class smbd(connection):
                     )
 
                     if self.is_wncr:
-                        xor_output = re.sub(b'\x00*$', b'', xor_output)
-                    fp.write(xor_output[offset:])
+                        # Now "xor_output[offset:]" contains a DLL with export named PlayGame that holds the W resource. 
+                        # The W resource is populated with a copy of the malware binary which we'll extract.
+                        pe = lief.parse(xor_output[offset:])
+                        for pe_dir in pe.resources.childs:
+                            if pe_dir.has_name:
+                                name = pe_dir.name
+                                for node in pe_dir.childs:
+                                    for resource in node.childs:
+                                        if name == 'W': 
+                                            # TODO: Don't depend on the resource name
+                                            size = struct.unpack_from('<L', bytearray(resource.content))[0]
+                                            # TODO: Check size for sanity
+                                            # The first 4 bytes are the actual size 
+                                            fp.write(bytearray(resource.content[4:size + 4]))
+                    else:
+                        fp.write(xor_output[offset:])
                     fp.close()
                     self.buf2 = b''
                     xor_output = b''
