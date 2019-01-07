@@ -46,14 +46,7 @@ class logsqlhandler(ihandler):
         self.geoipdb_city_path = config.get("geoipdb").get("geoipdb_city_path", "")
         self.geoipdb_asn_path = config.get("geoipdb").get("geoipdb_asn_path", "")
         self.vtapikey = config.get("virustotal").get("apikey", "")
-        print("!!!!!!!!!database!!!!!!!!", self.database)
-        print("!!!!!!!!!user!!!!!!!!", self.user)
-        print("!!!!!!!!!password!!!!!!!!", self.password)
-        print("!!!!!!!!!host!!!!!!!!", self.host)
-        print("!!!!!!!!!port!!!!!!!!", self.port)
-        print("!!!!!!!!!geoipdb!!!!!!!!", config.get("geoipdb"))
-        print("!!!!!!!!!vtapikey!!!!!!!!", self.vtapikey)
-
+        
     def start(self):
         ihandler.__init__(self, self.path)
         # mapping socket -> attackid
