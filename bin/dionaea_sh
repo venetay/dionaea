@@ -30,6 +30,7 @@ dionaea_status() {
 
 dionaea_start() {
     # Start Dionaea
+    dionaea_status
     PID=$(cat ${PIDFILE} 2>/dev/null || echo -n "")
     if [ -z "$PID" ]; then
         echo "Starting dionaea ..."
