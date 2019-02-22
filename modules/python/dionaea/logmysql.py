@@ -17,7 +17,7 @@ logger.setLevel(logging.DEBUG)
 
 
 def if_not_exist_index(self, tbl_name, idx_name):
-        x = self.cursor.execute("""SELECT COUNT(1) IndexIsThere 
+        x = self._execute_query("""SELECT COUNT(1) IndexIsThere 
             FROM INFORMATION_SCHEMA.STATISTICS
             WHERE table_schema=DATABASE() AND table_name='%s' AND index_name='%s';""" % (tbl_name, idx_name))
         if x == 0:
@@ -46,7 +46,42 @@ class logsqlhandler(ihandler):
         self.geoipdb_city_path = config.get("geoipdb").get("geoipdb_city_path", "")
         self.geoipdb_asn_path = config.get("geoipdb").get("geoipdb_asn_path", "")
         self.vtapikey = config.get("virustotal").get("apikey", "")
+        self.dbh = None
+        self.cursor = None
         
+    def _connect_database(self, host, user, password, database, port):
+        try:
+            dbh = MySQLdb.connect(host=host, user=user, passwd=password, db=database, port=port, charset="utf8", use_unicode=True)
+        except Exception as e:
+            logger.warning("Unable to connect the database %s", e)
+            dbh = None
+        return dbh
+
+    def _execute_query(self, query, args=None):
+        try:
+            self.cursor = self.dbh.cursor()
+            if args:
+                r = self.cursor.execute(query, args)
+            else:
+                r = self.cursor.execute(query)
+        except MySQLdb.OperationalError as e:
+            if e[0] not in (2003, 2006, 2013):
+                logger.error("MySQLdb: got error {0}, retrying operation".format(e))
+            self.dbh = self._connect_database(self.host, self.user, self.password, self.database, int(self.port))
+            self.cursor = self.dbh.cursor()
+            if args:
+                r = self.cursor.execute(query, args)
+            else:
+                r = self.cursor.execute(query)
+        except:
+            self.dbh = self._connect_database(self.host, self.user, self.password, self.database, int(self.port))
+            self.cursor = self.dbh.cursor()
+            if args:
+                r = self.cursor.execute(query, args)
+            else:
+                r = self.cursor.execute(query)
+        return r
+
     def start(self):
         ihandler.__init__(self, self.path)
         # mapping socket -> attackid
@@ -54,16 +89,13 @@ class logsqlhandler(ihandler):
 
         self.pending = {}
 
-        try:
-            self.dbh = MySQLdb.connect(host=self.host, user=self.user, passwd=self.password, db=self.database, port=int(self.port), charset="utf8", use_unicode=True)
-        except:
-            print("Unable to connect the database")
+        self.dbh = self._connect_database(self.host, self.user, self.password, self.database, int(self.port))
 
         self.cursor = self.dbh.cursor()
 
         update = False
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS 
+        self._execute_query("""CREATE TABLE IF NOT EXISTS 
         connections (
                 connection INTEGER NOT NULL AUTO_INCREMENT,
                 connection_type VARCHAR(15),
@@ -86,8 +118,8 @@ class logsqlhandler(ihandler):
                 PRIMARY KEY (connection)
         )""")
 
-        self.cursor.execute("""DROP TRIGGER IF EXISTS connections_INSERT_update_connection_root_trg""")
-        self.cursor.execute("""CREATE TRIGGER connections_INSERT_update_connection_root_trg
+        self._execute_query("""DROP TRIGGER IF EXISTS connections_INSERT_update_connection_root_trg""")
+        self._execute_query("""CREATE TRIGGER connections_INSERT_update_connection_root_trg
             BEFORE INSERT ON connections
             FOR EACH ROW
                 BEGIN
@@ -102,34 +134,15 @@ class logsqlhandler(ihandler):
         
         for idx in ["type","timestamp","root","parent"]:
             if if_not_exist_index(self, "connections", "connections_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX connections_%s_idx
+                self._execute_query("""CREATE INDEX connections_%s_idx
                 ON connections (connection_%s)""" % (idx, idx))
 
         for idx in ["local_host","local_port","remote_host"]:
             if if_not_exist_index(self, "connections", "connections_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX connections_%s_idx
+                self._execute_query("""CREATE INDEX connections_%s_idx
                 ON connections (%s)""" % (idx, idx))
 
-
-#         self.cursor.execute("""CREATE TABLE IF NOT EXISTS
-#            bistreams (
-#                bistream INTEGER NOT NULL AUTO_INCREMENT,
-#                connection INTEGER,
-#                bistream_data TEXT,
-#         PRIMARY KEY (bistream)
-#            )""")
-#
-#        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
-#            smbs (
-#                smb NOT NULL AUTO_INCREMENT,
-#                connection INTEGER,
-#                smb_direction TEXT,
-#                smb_action TEXT,
-#                CONSTRAINT smb_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection),
-#         PRIMARY KEY (smb)
-#            )""")
-
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS 
+        self._execute_query("""CREATE TABLE IF NOT EXISTS 
             dcerpcbinds (
                 dcerpcbind INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -141,10 +154,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["uuid","transfersyntax"]:
             if if_not_exist_index(self, "dcerpcbinds", "dcerpcbinds_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX dcerpcbinds_%s_idx
+                self._execute_query("""CREATE INDEX dcerpcbinds_%s_idx
                 ON dcerpcbinds (dcerpcbind_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS 
+        self._execute_query("""CREATE TABLE IF NOT EXISTS 
             dcerpcrequests (
                 dcerpcrequest INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -156,11 +169,11 @@ class logsqlhandler(ihandler):
 
         for idx in ["uuid","opnum"]:
             if if_not_exist_index(self, "dcerpcrequests", "dcerpcrequests_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX dcerpcrequests_%s_idx
+                self._execute_query("""CREATE INDEX dcerpcrequests_%s_idx
                 ON dcerpcrequests (dcerpcrequest_%s)""" % (idx, idx))
 
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             dcerpcservices (
                 dcerpcservice INTEGER NOT NULL AUTO_INCREMENT,
                 dcerpcservice_uuid VARCHAR(36),
@@ -176,7 +189,7 @@ class logsqlhandler(ihandler):
         for name, servicecls in services:
             if not name == 'RPCService' and issubclass(servicecls, rpcservices.RPCService):
                 try:
-                    self.cursor.execute("INSERT INTO dcerpcservices (dcerpcservice_name, dcerpcservice_uuid) VALUES (%s,%s)",
+                    self._execute_query("INSERT INTO dcerpcservices (dcerpcservice_name, dcerpcservice_uuid) VALUES (%s,%s)",
                                         (name, str(UUID(hex=servicecls.uuid))) )
                 except Exception as e:
 #                    print("dcerpcservice %s existed %s " % (servicecls.uuid, e) )
@@ -185,7 +198,7 @@ class logsqlhandler(ihandler):
         #self.dbh.commit()
 
         logger.info("Getting RPC Services")
-        r = self.cursor.execute("SELECT * FROM dcerpcservices")
+        r = self._execute_query("SELECT * FROM dcerpcservices")
 #        print(r)
         names = [self.cursor.description[x][0] for x in range(len(self.cursor.description))]
         r = [ dict(zip(names, i)) for i in self.cursor]
@@ -195,7 +208,7 @@ class logsqlhandler(ihandler):
 #        print(r)
 
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             dcerpcserviceops (
                 dcerpcserviceop INTEGER NOT NULL AUTO_INCREMENT,
                 dcerpcservice INTEGER,
@@ -217,7 +230,7 @@ class logsqlhandler(ihandler):
                     if opnum in servicecls.vulns:
                         vuln = servicecls.vulns[opnum]
                     try:
-                        self.cursor.execute("INSERT INTO dcerpcserviceops (dcerpcservice, dcerpcserviceop_opnum, dcerpcserviceop_name, dcerpcserviceop_vuln) VALUES (%s,%s,%s,%s)",
+                        self._execute_query("INSERT INTO dcerpcserviceops (dcerpcservice, dcerpcserviceop_opnum, dcerpcserviceop_name, dcerpcserviceop_vuln) VALUES (%s,%s,%s,%s)",
                              (dcerpcservice, opnum, op, vuln))
                     except:
 #                        print("%s %s %s %s %s existed" % (dcerpcservice, uuid, name, op, vuln))
@@ -228,20 +241,20 @@ class logsqlhandler(ihandler):
         # NetPathCompare was called NetCompare in dcerpcserviceops
         try:
             logger.debug("Trying to update table: dcerpcserviceops")
-            self.cursor.execute(
+            self._execute_query(
                 """SELECT * FROM dcerpcserviceops WHERE dcerpcserviceop_name = 'NetCompare'""")
             x = self.cursor.fetchall()
             if len(x) > 0:
-                self.cursor.execute(
+                self._execute_query(
                     """UPDATE dcerpcserviceops SET dcerpcserviceop_name = 'NetPathCompare' WHERE dcerpcserviceop_name = 'NetCompare'""")
                 logger.debug("... done")
             else:
                 logger.info("... not required")
         except Exception as e:
-            print(e)
+            logger.error(e)
             logger.info("... not required")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             emu_profiles (
                 emu_profile INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -252,7 +265,7 @@ class logsqlhandler(ihandler):
 
         # self.dbh.commit()
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS 
+        self._execute_query("""CREATE TABLE IF NOT EXISTS 
             emu_services (
                 emu_serivce INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -261,7 +274,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT emu_services_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS 
+        self._execute_query("""CREATE TABLE IF NOT EXISTS 
             offers (
                 offer INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -271,10 +284,10 @@ class logsqlhandler(ihandler):
             )""")
 
         if if_not_exist_index(self, "offers", "offers_url_idx"):
-            self.cursor.execute(
+            self._execute_query(
                 """CREATE INDEX offers_url_idx ON offers (offer_url)""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             downloads (
                 download INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -289,11 +302,11 @@ class logsqlhandler(ihandler):
 
         for idx in ["url", "md5_hash"]:
             if if_not_exist_index(self, "downloads", "downloads_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX downloads_%s_idx
+                self._execute_query("""CREATE INDEX downloads_%s_idx
                 ON downloads (download_%s)""" % (idx, idx))
 
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             resolves (
                 resolve INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -303,7 +316,7 @@ class logsqlhandler(ihandler):
                 PRIMARY KEY (resolve)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             p0fs (
                 p0f INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -321,10 +334,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["genre","detail","uptime"]:
             if if_not_exist_index(self, "p0fs", "p0fs_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX p0fs_%s_idx
+                self._execute_query("""CREATE INDEX p0fs_%s_idx
                 ON p0fs (p0f_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             logins (
                 login INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -336,10 +349,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["username","password"]:
             if if_not_exist_index(self, "logins", "logins_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX logins_%s_idx
+                self._execute_query("""CREATE INDEX logins_%s_idx
                 ON logins (login_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mssql_fingerprints (
                 mssql_fingerprint INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -352,10 +365,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["hostname","appname","cltintname"]:
             if if_not_exist_index(self, "mssql_fingerprints", "mssql_fingerprints_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mssql_fingerprints_%s_idx
+                self._execute_query("""CREATE INDEX mssql_fingerprints_%s_idx
                 ON mssql_fingerprints (mssql_fingerprint_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mssql_commands (
                 mssql_command INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -367,12 +380,12 @@ class logsqlhandler(ihandler):
 
         for idx in ["status"]:
             if if_not_exist_index(self, "mssql_commands", "mssql_commands_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mssql_commands_%s_idx
+                self._execute_query("""CREATE INDEX mssql_commands_%s_idx
                 ON mssql_commands (mssql_command_%s)""" % (idx, idx))
 
 
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS virustotals (
+        self._execute_query("""CREATE TABLE IF NOT EXISTS virustotals (
                 virustotal INTEGER NOT NULL AUTO_INCREMENT,
                 virustotal_md5_hash VARCHAR(32) NOT NULL,
                 virustotal_timestamp INTEGER NOT NULL,
@@ -382,10 +395,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["md5_hash"]:
             if if_not_exist_index(self, "virustotals", "virustotals_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX virustotals_%s_idx
+                self._execute_query("""CREATE INDEX virustotals_%s_idx
                 ON virustotals (virustotal_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS virustotalscans (
+        self._execute_query("""CREATE TABLE IF NOT EXISTS virustotalscans (
             virustotalscan INTEGER NOT NULL AUTO_INCREMENT,
             virustotal INTEGER NOT NULL,
             virustotalscan_scanner VARCHAR(256) NOT NULL,
@@ -395,14 +408,14 @@ class logsqlhandler(ihandler):
 
         for idx in ["scanner","result"]:
             if if_not_exist_index(self, "virustotalscans", "virustotalscans_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX virustotalscans_%s_idx
+                self._execute_query("""CREATE INDEX virustotalscans_%s_idx
                 ON virustotalscans (virustotalscan_%s)""" % (idx, idx))
 
         if if_not_exist_index(self, "virustotalscans", "virustotalscans_virustotal_idx"):
-            self.cursor.execute("""CREATE INDEX virustotalscans_virustotal_idx
+            self._execute_query("""CREATE INDEX virustotalscans_virustotal_idx
                 ON virustotalscans (virustotal)""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mysql_commands (
                 mysql_command INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -411,7 +424,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT mysql_commands_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mysql_command_args (
                 mysql_command_arg INTEGER NOT NULL AUTO_INCREMENT,
                 mysql_command INTEGER,
@@ -423,10 +436,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["command"]:
             if if_not_exist_index(self, "mysql_command_args", "mysql_command_args_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mysql_command_args_%s_idx
+                self._execute_query("""CREATE INDEX mysql_command_args_%s_idx
                 ON mysql_command_args (mysql_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mysql_command_ops (
                 mysql_command_op INTEGER NOT NULL AUTO_INCREMENT,
                 mysql_command_cmd INTEGER NOT NULL,
@@ -439,12 +452,12 @@ class logsqlhandler(ihandler):
         logger.info("Setting MySQL Command Ops")
         for num,name in MySQL_Commands.items():
             try:
-                self.cursor.execute("INSERT INTO mysql_command_ops (mysql_command_cmd, mysql_command_op_name) VALUES (%s,%s)",
+                self._execute_query("INSERT INTO mysql_command_ops (mysql_command_cmd, mysql_command_op_name) VALUES (%s,%s)",
                                     (num, name))
             except:
                 pass
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_commands (
                 sip_command INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -456,7 +469,7 @@ class logsqlhandler(ihandler):
             -- CONSTRAINT sip_commands_connection_fkey FOREIGN KEY (connection) REFERENCES connections (connection)
         )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_addrs (
                 sip_addr INTEGER NOT NULL AUTO_INCREMENT,
                 sip_command INTEGER,
@@ -471,7 +484,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT sip_addrs_command_fkey FOREIGN KEY (sip_command) REFERENCES sip_commands (sip_command)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_vias (
                 sip_via INTEGER NOT NULL AUTO_INCREMENT,
                 sip_command INTEGER,
@@ -482,7 +495,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT sip_vias_command_fkey FOREIGN KEY (sip_command) REFERENCES sip_commands (sip_command)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_sdp_origins (
                 sip_sdp_origin INTEGER NOT NULL AUTO_INCREMENT,
                 sip_command INTEGER,
@@ -496,7 +509,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT sip_sdp_origins_fkey FOREIGN KEY (sip_command) REFERENCES sip_commands (sip_command)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_sdp_connectiondatas (
                 sip_sdp_connectiondata INTEGER NOT NULL AUTO_INCREMENT,
                 sip_command INTEGER,
@@ -509,7 +522,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT sip_sdp_connectiondatas_fkey FOREIGN KEY (sip_command) REFERENCES sip_commands (sip_command)
             )""")
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             sip_sdp_medias (
                 sip_sdp_media INTEGER NOT NULL AUTO_INCREMENT,
                 sip_command INTEGER,
@@ -523,7 +536,7 @@ class logsqlhandler(ihandler):
                 -- CONSTRAINT sip_sdp_medias_fkey FOREIGN KEY (sip_command) REFERENCES sip_commands (sip_command)
             )""")
 
-#        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+#        self._execute_query("""CREATE TABLE IF NOT EXISTS
 #            httpheaders (
 #                httpheader INTEGER NOT NULL AUTO_INCREMENT,
 #                connection INTEGER,
@@ -534,10 +547,10 @@ class logsqlhandler(ihandler):
 #            )""")
 #
 #        for idx in ["headerkey","headervalue"]:
-#            self.cursor.execute("""CREATE INDEX httpheaders_%s_idx 
+#            self._execute_query("""CREATE INDEX httpheaders_%s_idx 
 #            ON httpheaders (httpheader_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mqtt_fingerprints (
                 mqtt_fingerprint INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -552,10 +565,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["clientid","willtopic","willmessage", "username", "password"]:
             if if_not_exist_index(self, "mqtt_fingerprints", "mqtt_fingerprints_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mqtt_fingerprints_%s_idx 
+                self._execute_query("""CREATE INDEX mqtt_fingerprints_%s_idx 
                 ON mqtt_fingerprints (mqtt_fingerprint_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mqtt_publish_commands (
                 mqtt_publish_command INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -567,10 +580,10 @@ class logsqlhandler(ihandler):
 
         for idx in ["topic", "message"]:
             if if_not_exist_index(self, "mqtt_publish_commands", "mqtt_publish_commands_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mqtt_publish_commands_%s_idx 
+                self._execute_query("""CREATE INDEX mqtt_publish_commands_%s_idx 
                 ON mqtt_publish_commands (mqtt_publish_command_%s)""" % (idx, idx))
 
-        self.cursor.execute("""CREATE TABLE IF NOT EXISTS
+        self._execute_query("""CREATE TABLE IF NOT EXISTS
             mqtt_subscribe_commands (
                 mqtt_subscribe_command INTEGER NOT NULL AUTO_INCREMENT,
                 connection INTEGER,
@@ -582,13 +595,13 @@ class logsqlhandler(ihandler):
 
         for idx in ["messageid", "topic"]:
             if if_not_exist_index(self, "mqtt_subscribe_commands", "mqtt_subscribe_commands_%s_idx"%idx):
-                self.cursor.execute("""CREATE INDEX mqtt_subscribe_commands_%s_idx 
+                self._execute_query("""CREATE INDEX mqtt_subscribe_commands_%s_idx 
                 ON mqtt_subscribe_commands (mqtt_subscribe_command_%s)""" % (idx, idx))
 
         # connection index for all
         for idx in ["dcerpcbinds", "dcerpcrequests", "emu_profiles", "emu_services", "offers", "downloads", "p0fs", "logins", "mssql_fingerprints", "mssql_commands","mysql_commands","sip_commands", "mqtt_fingerprints", "mqtt_publish_commands", "mqtt_subscribe_commands"]:
             if if_not_exist_index(self, "%s"%idx, "%s_connection_idx"%idx):
-                self.cursor.execute(
+                self._execute_query(
                     """CREATE INDEX %s_connection_idx    ON %s (connection)""" % (idx, idx)
                 )
 
@@ -605,13 +618,13 @@ class logsqlhandler(ihandler):
         # drop the old table
         try:
             logger.debug("Updating Table dcerpcs")
-            self.cursor.execute("""INSERT INTO
+            self._execute_query("""INSERT INTO
                                     dcerpcrequests (connection, dcerpcrequest_uuid, dcerpcrequest_opnum)
                                 SELECT
                                     connection, dcerpc_uuid, dcerpc_opnum
                                 FROM
                                     dcerpcs""")
-            self.cursor.execute("""DROP TABLE dcerpcs""")
+            self._execute_query("""DROP TABLE dcerpcs""")
             logger.debug("... done")
         except Exception as e:
             #            print(e)
@@ -648,12 +661,12 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attack_id = self.attacks[con][1]
             try:
-                self.cursor.execute(
+                self._execute_query(
                     "INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
                     (attack_id, icd.username, icd.password)
                 )
             except Exception as e:
-                print(e)
+                logger.error(e)
 
             self.dbh.commit()
 
@@ -701,13 +714,15 @@ class logsqlhandler(ihandler):
         t = time.time()
         dt = datetime.datetime.fromtimestamp(t)
         try:        
-            r = self.cursor.execute("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            r = self._execute_query("INSERT INTO connections (connection_timestamp, connection_type, connection_transport, connection_protocol, local_host, local_port, remote_host, remote_hostname, remote_port, country_name, country_iso_code, city_name, org, org_asn, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                                     (t, connection_type, con.transport, con.protocol, con.local.host, con.local.port, con.remote.host, con.remote.hostname, con.remote.port, country, country_code, city, org, asn_num, dt) )
+            attackid = self.cursor.lastrowid
+            self.dbh.commit()
         except Exception as e:
-            print(e)        
-        attackid = self.cursor.lastrowid
+            attackid = 0
+            logger.error(e)        
+
         self.attacks[con] = (attackid, attackid, t, dt)
-        self.dbh.commit()
 
         # maybe this was a early connection?
         if con in self.pending:
@@ -718,13 +733,13 @@ class logsqlhandler(ihandler):
             for i in self.pending[con]:
                 print("%s %s %s" % (attackid, attackid, i))
             try:                
-                self.cursor.execute("UPDATE connections SET connection_root = %s, connection_parent = %s WHERE connection = %s",
+                self._execute_query("UPDATE connections SET connection_root = %s, connection_parent = %s WHERE connection = %s",
                                     (attackid, attackid, i ) )
-                self.cursor.execute("UPDATE connections SET connection_root = %s WHERE connection_root = %s",
+                self._execute_query("UPDATE connections SET connection_root = %s WHERE connection_root = %s",
                                     (attackid, i ) )
+                self.dbh.commit()
             except Exception as e:
-                print(e)
-        self.dbh.commit()
+                logger.error(e)
 
         return attackid
 
@@ -809,10 +824,10 @@ class logsqlhandler(ihandler):
             logger.info("child %i parent %i root %i" %
                         (childid, parentid, parentroot) )
             try:            
-                r = self.cursor.execute("UPDATE connections SET connection_root = %s, connection_parent = %s WHERE connection = %s",
+                r = self._execute_query("UPDATE connections SET connection_root = %s, connection_parent = %s WHERE connection = %s",
                                     (parentroot, parentid, childid) )
             except Exception as e:
-                print(e)
+                logger.error(e)
             self.dbh.commit()
 
         if icd.child in self.pending:
@@ -825,10 +840,10 @@ class logsqlhandler(ihandler):
             else:
                 childid = parentid
             try:
-                self.cursor.execute("UPDATE connections SET connection_root = %s WHERE connection_root = %s",
+                self._execute_query("UPDATE connections SET connection_root = %s WHERE connection_root = %s",
                                 (parentroot, childid) )
             except Exception as e:
-                print(e)
+                logger.error(e)
             self.dbh.commit()
 
     def handle_incident_dionaea_connection_free(self, icd):
@@ -851,10 +866,10 @@ class logsqlhandler(ihandler):
         attackid = self.attacks[con][1]
         logger.info("emu profile for attackid %i" % attackid)
         try:
-            self.cursor.execute("INSERT INTO emu_profiles (connection, emu_profile_json) VALUES (%s,%s)",
+            self._execute_query("INSERT INTO emu_profiles (connection, emu_profile_json) VALUES (%s,%s)",
                                 (attackid, icd.profile) )
         except Exception as e:
-            print(e)        
+            logger.error(e)        
         self.dbh.commit()
 
 
@@ -865,10 +880,10 @@ class logsqlhandler(ihandler):
         attackid = self.attacks[con][1]
         logger.info("offer for attackid %i" % attackid)
         try:
-            self.cursor.execute("INSERT INTO offers (connection, offer_url) VALUES (%s,%s)",
+            self._execute_query("INSERT INTO offers (connection, offer_url) VALUES (%s,%s)",
                             (attackid, icd.url) )
         except Exception as e:
-            print(e)
+            logger.error(e)
         self.dbh.commit()
 
     def handle_incident_dionaea_download_complete_hash(self, icd):
@@ -878,14 +893,14 @@ class logsqlhandler(ihandler):
         attackid = self.attacks[con][1]
         time = self.attacks[con][2]
         dt = self.attacks[con][3]
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!1", self.attacks[con])
+        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", self.attacks[con])
         logger.info("complete for attackid %i" % attackid)
-        print("!!!!!!!!!!!!!!!!!!!1", icd.file_size)
+        print("!!!!!!!!!!!!!!!!!!!", icd.file_size)
         try:
-            self.cursor.execute("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s)",
+            self._execute_query("INSERT INTO downloads (connection, download_url, download_md5_hash, connection_timestamp, filesize, connection_datetime) VALUES (%s,%s,%s,%s,%s,%s)",
                             (attackid, icd.url, icd.md5hash, time, icd.file_size, dt))
         except Exception as e:
-            print(e)
+            logger.error(e)
         self.dbh.commit()
 
         self.handle_incident_dionaea_modules_python_virustotal_report(icd)
@@ -898,10 +913,10 @@ class logsqlhandler(ihandler):
         attackid = self.attacks[con][1]
         logger.info("listen shell for attackid %i" % attackid)
         try:        
-            self.cursor.execute("INSERT INTO emu_services (connection, emu_service_url) VALUES (%s,%s)",
+            self._execute_query("INSERT INTO emu_services (connection, emu_service_url) VALUES (%s,%s)",
                                 (attackid, "bindshell://"+str(icd.port)) )
         except Exception as e:
-            print(e)
+            logger.error(e)
         self.dbh.commit()
 
     def handle_incident_dionaea_service_shell_connect(self, icd):
@@ -911,10 +926,10 @@ class logsqlhandler(ihandler):
         attackid = self.attacks[con][1]
         logger.info("connect shell for attackid %i" % attackid)
         try:        
-            self.cursor.execute("INSERT INTO emu_services (connection, emu_service_url) VALUES (%s,%s)",
+            self._execute_query("INSERT INTO emu_services (connection, emu_service_url) VALUES (%s,%s)",
                                 (attackid, "connectbackshell://"+str(icd.host)+":"+str(icd.port)) )
         except Exception as e:
-            print(e)
+            logger.error(e)
             
         self.dbh.commit()
 
@@ -923,10 +938,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:    
-            self.cursor.execute("INSERT INTO p0fs (connection, p0f_genre, p0f_link, p0f_detail, p0f_uptime, p0f_tos, p0f_dist, p0f_nat, p0f_fw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            self._execute_query("INSERT INTO p0fs (connection, p0f_genre, p0f_link, p0f_detail, p0f_uptime, p0f_tos, p0f_dist, p0f_nat, p0f_fw) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
                                 ( attackid, icd.genre, icd.link, icd.detail, icd.uptime, icd.tos, icd.dist, icd.nat, icd.fw))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -938,10 +953,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:            
-            self.cursor.execute("INSERT INTO dcerpcrequests (connection, dcerpcrequest_uuid, dcerpcrequest_opnum) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO dcerpcrequests (connection, dcerpcrequest_uuid, dcerpcrequest_opnum) VALUES (%s,%s,%s)",
                                 (attackid, icd.uuid, icd.opnum))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -950,10 +965,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:            
-            self.cursor.execute("INSERT INTO dcerpcbinds (connection, dcerpcbind_uuid, dcerpcbind_transfersyntax) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO dcerpcbinds (connection, dcerpcbind_uuid, dcerpcbind_transfersyntax) VALUES (%s,%s,%s)",
                                 (attackid, icd.uuid, icd.transfersyntax))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -962,12 +977,12 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:
-            self.cursor.execute("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
                             (attackid, icd.username, icd.password))
-            self.cursor.execute("INSERT INTO mssql_fingerprints (connection, mssql_fingerprint_hostname, mssql_fingerprint_appname, mssql_fingerprint_cltintname) VALUES (%s,%s,%s,%s)",
+            self._execute_query("INSERT INTO mssql_fingerprints (connection, mssql_fingerprint_hostname, mssql_fingerprint_appname, mssql_fingerprint_cltintname) VALUES (%s,%s,%s,%s)",
                             (attackid, icd.hostname, icd.appname, icd.cltintname))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -976,16 +991,16 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:
-            self.cursor.execute("INSERT INTO mssql_commands (connection, mssql_command_status, mssql_command_cmd) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO mssql_commands (connection, mssql_command_status, mssql_command_cmd) VALUES (%s,%s,%s)",
                                 (attackid, icd.status, icd.cmd))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
     def handle_incident_dionaea_modules_python_virustotal_report(self, icd):
         md5 = icd.md5hash
-        is_exist = self.cursor.execute("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
+        is_exist = self._execute_query("SELECT virustotal_md5_hash FROM virustotals  WHERE virustotal_md5_hash='%s'" % md5)
         print("!!!!!!!!!!select!!!!!!!!!!", is_exist, is_exist == 0, type(is_exist))
         if is_exist == 0: 
             if not self.vtapikey:
@@ -1012,10 +1027,10 @@ class logsqlhandler(ihandler):
                 # Convert UTC scan_date to Unix time  
                 date = calendar.timegm(time.strptime(j['scan_date'], '%Y-%m-%d %H:%M:%S'))
                 try:            
-                    self.cursor.execute("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
+                    self._execute_query("INSERT INTO virustotals (virustotal_md5_hash, virustotal_permalink, virustotal_timestamp) VALUES (%s,%s,%s)",
                                         (md5, permalink, date))
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
 
                 self.dbh.commit()
 
@@ -1028,10 +1043,10 @@ class logsqlhandler(ihandler):
                     if res == '':
                         res = None
                     try:
-                        self.cursor.execute("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
+                        self._execute_query("""INSERT INTO virustotalscans (virustotal, virustotalscan_scanner, virustotalscan_result) VALUES (%s,%s,%s)""",
                                             (virustotal, av, res))
                     except Exception as e:
-                        print(e)
+                        logger.error(e)
                    
                     logger.debug("scanner {} result {}".format(av,scans[av]))
                 self.dbh.commit()
@@ -1041,10 +1056,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:            
-            self.cursor.execute("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
                                 (attackid, icd.username, icd.password))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -1054,10 +1069,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:            
-            self.cursor.execute("INSERT INTO mysql_commands (connection, mysql_command_cmd) VALUES (%s,%s)",
+            self._execute_query("INSERT INTO mysql_commands (connection, mysql_command_cmd) VALUES (%s,%s)",
                                 (attackid, icd.command))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         cmdid = self.cursor.lastrowid
 
@@ -1066,10 +1081,10 @@ class logsqlhandler(ihandler):
             for i in range(len(args)):
                 arg = args[i]
                 try:
-                    self.cursor.execute("INSERT INTO mysql_command_args (mysql_command, mysql_command_arg_index, mysql_command_arg_data) VALUES (%s,%s,%s)",
+                    self._execute_query("INSERT INTO mysql_command_args (mysql_command, mysql_command_arg_index, mysql_command_arg_data) VALUES (%s,%s,%s)",
                                             (cmdid, i, arg))
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
 
         self.dbh.commit()
 
@@ -1105,18 +1120,18 @@ class logsqlhandler(ihandler):
 
         attackid = self.attacks[con][1]
         try:
-            self.cursor.execute("""INSERT INTO sip_commands
+            self._execute_query("""INSERT INTO sip_commands
                 (connection, sip_command_method, sip_command_call_id,
                 sip_command_user_agent, sip_command_allow) VALUES (%s,%s,%s,%s,%s)""",
                             (attackid, icd.method, icd.call_id, icd.user_agent, calc_allow(icd.allow)))
         except Exception as e:
-            print(e)
+            logger.error(e)
         
         cmdid = self.cursor.lastrowid
 
         def add_addr(cmd, _type, addr):
             try:
-                self.cursor.execute("""INSERT INTO sip_addrs
+                self._execute_query("""INSERT INTO sip_addrs
                     (sip_command, sip_addr_type, sip_addr_display_name,
                     sip_addr_uri_scheme, sip_addr_uri_user, sip_addr_uri_password,
                     sip_addr_uri_host, sip_addr_uri_port) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)""",
@@ -1127,7 +1142,7 @@ class logsqlhandler(ihandler):
                                     addr['uri']['host'], addr['uri']['port']
                                 ))
             except Exception as e:
-                print(e)
+                logger.error(e)
 
         add_addr(cmdid,'addr',icd.get('addr'))
         add_addr(cmdid,'to',icd.get('to'))
@@ -1137,7 +1152,7 @@ class logsqlhandler(ihandler):
 
         def add_via(cmd, via):
             try:
-                self.cursor.execute("""INSERT INTO sip_vias
+                self._execute_query("""INSERT INTO sip_vias
                     (sip_command, sip_via_protocol, sip_via_address, sip_via_port)
                     VALUES (%s,%s,%s,%s)""",
                                 (
@@ -1145,7 +1160,7 @@ class logsqlhandler(ihandler):
                                     via['address'], via['port']
                                 ))
             except Exception as e:
-                print(e)
+                logger.error(e)
 
 
         for i in icd.get('via'):
@@ -1154,7 +1169,7 @@ class logsqlhandler(ihandler):
         def add_sdp(cmd, sdp):
             def add_origin(cmd, o):
                 try:
-                    self.cursor.execute("""INSERT INTO sip_sdp_origins
+                    self._execute_query("""INSERT INTO sip_sdp_origins
                             (sip_command, sip_sdp_origin_username,
                             sip_sdp_origin_sess_id, sip_sdp_origin_sess_version,
                             sip_sdp_origin_nettype, sip_sdp_origin_addrtype,
@@ -1167,11 +1182,11 @@ class logsqlhandler(ihandler):
                                         o['unicast_address']
                                     ))
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
 
             def add_condata(cmd, c):
                 try:
-                    self.cursor.execute("""INSERT INTO sip_sdp_connectiondatas
+                    self._execute_query("""INSERT INTO sip_sdp_connectiondatas
                             (sip_command, sip_sdp_connectiondata_nettype,
                             sip_sdp_connectiondata_addrtype, sip_sdp_connectiondata_connection_address,
                             sip_sdp_connectiondata_ttl, sip_sdp_connectiondata_number_of_addresses)
@@ -1182,11 +1197,11 @@ class logsqlhandler(ihandler):
                                         c['ttl'], c['number_of_addresses']
                                     ))
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
 
             def add_media(cmd, c):
                 try:
-                    self.cursor.execute("""INSERT INTO sip_sdp_medias
+                    self._execute_query("""INSERT INTO sip_sdp_medias
                             (sip_command, sip_sdp_media_media,
                             sip_sdp_media_port, sip_sdp_media_number_of_ports,
                             sip_sdp_media_proto)
@@ -1197,7 +1212,7 @@ class logsqlhandler(ihandler):
                                         c['proto']
                                     ))
                 except Exception as e:
-                    print(e)
+                    logger.error(e)
 
             if 'o' in sdp:
                 add_origin(cmd, sdp['o'])
@@ -1216,13 +1231,13 @@ class logsqlhandler(ihandler):
         con = icd.con
         if con in self.attacks:
             attackid = self.attacks[con][1]
-            #self.cursor.execute("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
+            #self._execute_query("INSERT INTO logins (connection, login_username, login_password) VALUES (%s,%s,%s)",
             #    (attackid, icd.username, icd.password))
         try:
-            self.cursor.execute("INSERT INTO mqtt_fingerprints (connection, mqtt_fingerprint_clientid, mqtt_fingerprint_willtopic, mqtt_fingerprint_willmessage,mqtt_fingerprint_username,mqtt_fingerprint_password) VALUES (?,?,?,?,?,?)",
+            self._execute_query("INSERT INTO mqtt_fingerprints (connection, mqtt_fingerprint_clientid, mqtt_fingerprint_willtopic, mqtt_fingerprint_willmessage,mqtt_fingerprint_username,mqtt_fingerprint_password) VALUES (?,?,?,?,?,?)",
                     (attackid, icd.clientid, icd.willtopic, icd.willmessage, icd.username, icd.password))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -1231,10 +1246,10 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:            
-            self.cursor.execute("INSERT INTO mqtt_publish_commands (connection, mqtt_publish_command_topic, mqtt_publish_command_message) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO mqtt_publish_commands (connection, mqtt_publish_command_topic, mqtt_publish_command_message) VALUES (%s,%s,%s)",
                     (attackid, icd.publishtopic, icd.publishmessage))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
 
@@ -1243,9 +1258,9 @@ class logsqlhandler(ihandler):
         if con in self.attacks:
             attackid = self.attacks[con][1]
         try:
-            self.cursor.execute("INSERT INTO mqtt_subscribe_commands (connection, mqtt_subscribe_command_messageid, mqtt_subscribe_command_topic) VALUES (%s,%s,%s)",
+            self._execute_query("INSERT INTO mqtt_subscribe_commands (connection, mqtt_subscribe_command_messageid, mqtt_subscribe_command_topic) VALUES (%s,%s,%s)",
                     (attackid, icd.subscribemessageid, icd.subscribetopic))
         except Exception as e:
-            print(e)
+            logger.error(e)
 
         self.dbh.commit()
