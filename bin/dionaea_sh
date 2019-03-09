@@ -35,8 +35,9 @@ dionaea_start() {
     if [ -z "$PID" ]; then
         echo "Starting dionaea ..."
         cd ${DIONAEADIR}/build && make install >/dev/null 2>&1 && cd .. 
-        authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} -D 
+        /usr/bin/authbind ${script_dir}/dionaea -u ${USER} -g ${GROUP} -c ${DIONAEADIR}/${CFGFILE} -p ${DIONAEADIR}/${PIDFILE} ${DAEMONIZE}
     fi
+    echo "Start $?"
 }
 
 dionaea_stop() {
@@ -69,7 +70,8 @@ dionaea_stop() {
 }
 
 dionaea_usage() {
-    echo "usage: $0 <start|stop|restart|status>"
+    echo "usage: $0 [-n] <start|stop|restart|status>"
+    echo "    -n    Don't daemonize (makes sense only when used with start)"
 }
 
 ################################################################################
@@ -88,7 +90,31 @@ PIDFILE=var/run/dionaea.pid
 CFGFILE=etc/dionaea/dionaea.cfg
 USER=dionaea
 GROUP=dionaea
+DAEMONIZE="-D"
 set -e
+
+options=$(getopt -o hn -- "$@")
+[ $? -eq 0 ] || {
+    echo "Incorrect options provided"
+    exit 1
+}
+eval set -- "$options"
+while true; do
+    case "$1" in
+    -h)
+        dionaea_usage
+        exit
+        ;;
+    -n)
+	DAEMONIZE=""
+	shift
+	;;
+    --)
+        shift
+        break
+        ;;
+    esac
+done
 
 key=$1
 shift 1
